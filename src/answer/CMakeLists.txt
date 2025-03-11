@@ -14,12 +14,12 @@ find_package(cv_bridge REQUIRED)
 # uncomment the following section in order to fill in
 # further dependencies manually.
 # find_package(<dependency> REQUIRED)
-add_executable(answer_node src/answer_node.cpp)
-
-ament_target_dependencies(answer_node cv_bridge rclcpp OpenCV)
+add_executable(answer src/answer_node.cpp )
+# 关联库文件
+ament_target_dependencies(answer cv_bridge rclcpp OpenCV)
 
 install(TARGETS
-answer_node
+answer
 DESTINATION lib/${PROJECT_NAME}
 )
 
