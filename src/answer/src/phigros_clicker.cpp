@@ -28,6 +28,25 @@ void PhigrosClicker::image_callback(const sensor_msgs::msg::Image::SharedPtr msg
       geometry_msgs::msg::Point32 click_pos;
       RCLCPP_INFO(this->get_logger(), "成功转换图像, 尺寸: %dx%d", img.rows, img.cols);
       RCLCPP_INFO(this->get_logger(), "像素个数: %d", total_pixels);
+	  //创建一个新线程来处理图像
+      if (processing_thread_.joinable()) {
+            processing_thread_.join();  // 等待上一个线程结束
+        }
+
+      processing_thread_ = std::thread([this, img = std::move(img)]() mutable {
+          this->processImage(img);
+      });
+    }
+    catch (cv_bridge::Exception& e)
+    {
+      RCLCPP_ERROR(this->get_logger(), "图像转换失败: %s", e.what());
+    }
+
+
+  }
+
+void PhigrosClicker::processImage(cv::Mat img)
+{
       cv::Mat hsv;
       cv::cvtColor(img, hsv, cv::COLOR_BGR2HSV);//转换为HSV颜色空间
       //高斯模糊处理
@@ -47,31 +66,34 @@ void PhigrosClicker::image_callback(const sensor_msgs::msg::Image::SharedPtr msg
       cv::inRange(hsv, cv::Scalar(90, 100, 100), cv::Scalar(120, 255, 255), blue_mask);//提取蓝色区域
       std::vector <std::vector<cv::Point> > contours;//输出的轮廓列表，每个轮廓都是std::vector<cv::Point>
       cv::findContours(blue_mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE);//cv::RETR_EXTERNAL只提取最外层的轮廓，忽略嵌套的轮廓
+	  {
+            std::lock_guard<std::mutex> lock(data_mutex_);//作用：加锁，确保 blue_center_ 在多线程访问时是安全的。
+            blue_center_.clear();
+	  		float cx;
+      		float cy;
+      		//遍历所有轮廓
+      		for (const auto &contour : contours)
+            {
+        		cv::Moments m = cv::moments(contour, true);
+        		if(m.m00 > 0){
+        			cx = int(m.m10 / m.m00);//计算x方向的质心
+        			cy = int(m.m01 / m.m00);//计算y方向的质心
 
-	  float cx;
-      float cy;
-      //遍历所有轮廓
-      for (const auto &contour : contours) {
-        cv::Moments m = cv::moments(contour, true);
-        if(m.m00 > 0){
-        	cx = int(m.m10 / m.m00);//计算x方向的质心
-        	cy = int(m.m01 / m.m00);//计算y方向的质心
+        			std::cout << "蓝色区域中心：（" << cx << "," << cy << ")" << std::endl;
 
-        	std::cout << "蓝色区域中心：（" << cx << "," << cy << ")" << std::endl;
-
-            blue_center_.push_back(cv::Point2f(cx, cy));//存入中心列表
-            std::sort(blue_center_.begin(), blue_center_.end(), [](const cv::Point2i &a, const cv::Point2i &b) {
-              return a.y > b.y;
-            });
-      	}
-      	//m.m00	区域面积（像素数）
-        //m.m10	计算重心 X 方向的矩
-        //m.m01	计算重心 Y 方向的矩
-        //m.m11	计算区域的倾斜程度
-        //m.m20	计算水平方向的分布
-        //m.m02	计算垂直方向的分布
-      }
-
+            		blue_center_.push_back(cv::Point2f(cx, cy));//存入中心列表
+            		std::sort(blue_center_.begin(), blue_center_.end(), [](const cv::Point2i &a, const cv::Point2i &b) {
+              			return a.y > b.y;
+            		});
+      			}
+      		//m.m00	区域面积（像素数）
+        	//m.m10	计算重心 X 方向的矩
+        	//m.m01	计算重心 Y 方向的矩
+        	//m.m11	计算区域的倾斜程度
+        	//m.m20	计算水平方向的分布
+        	//m.m02	计算垂直方向的分布
+			}
+	  }
       cv::HoughLinesP(edges, lines, 1.0, CV_PI/180.0, 100, 500, 30);
       	//edges	经过 Canny 边缘检测 处理的 二值图
 		//lines	输出的 直线集合，每条直线由 四个整数 (x1, y1, x2, y2) 组成
@@ -80,29 +102,33 @@ void PhigrosClicker::image_callback(const sensor_msgs::msg::Image::SharedPtr msg
 		//100	投票阈值（最小投票数，越大则检测出的直线越少，但质量越高）
 		//500	最短直线长度（低于这个长度的直线会被忽略）
 		//30	最大间断长度（间断部分小于这个值的直线会被合并）
-
-      for (size_t i = 0; i < lines.size(); i++)
       {
-        cv::Vec4i l= lines[i];
-        std::cout << "Line:" << l[0] << " " << l[1] << " " << l[2] << " " << l[3] << std::endl;
-        lines_center_[0].x = (l[0] + l[2]) / 2;//计算判定线的中心坐标
-        lines_center_[0].y = (l[1] + l[3]) / 2;
-        std::cout << "Line_point" << lines_center_[0].x << " " << lines_center_[0].y << std::endl;
-
-      }
-
-      if(lines_center_[0].y - blue_center_[0].y <= 22.0 )
+	  	std::lock_guard<std::mutex> lock(data_mutex_);
+        lines_center_.clear();
+      	for (size_t i = 0; i < lines.size(); i++)
+      	{
+        	cv::Vec4i l= lines[i];
+        	std::cout << "Line:" << l[0] << " " << l[1] << " " << l[2] << " " << l[3] << std::endl;
+        	std::cout << "Line_point" << (l[0] + l[2]) / 2.0 << " " << (l[1] + l[3]) / 2.0 << std::endl;
+			lines_center_.emplace_back((l[0] + l[2]) / 2.0 , (l[1] + l[3]) / 2.0);
+      	}
+	  }
       {
-
-        click_pos.x = blue_center_[0].x;
-        click_pos.y = blue_center_[0].y;
-        click_pos.z = 0;
-        //发布点击位置
-        pos_pub_->publish(click_pos);
-        RCLCPP_INFO(this->get_logger(), "发布点击位置:(%2f, %2f)", click_pos.x, click_pos.y);
-		blue_center_.erase(blue_center_.begin());
+        std::lock_guard<std::mutex> lock(data_mutex_);
+      	if(lines_center_[0].y - blue_center_[0].y <= 22.0 && blue_center_.size() > 0 && lines_center_.size() > 0)
+      	{
+			geometry_msgs::msg::Point32 click_pos;
+        	click_pos.x = blue_center_[0].x;
+        	click_pos.y = blue_center_[0].y;
+        	click_pos.z = 0;
+        	//发布点击位置
+        	pos_pub_->publish(click_pos);
+        	RCLCPP_INFO(this->get_logger(), "发布点击位置:(%2f, %2f)", click_pos.x, click_pos.y);
+			blue_center_.erase(blue_center_.begin());
+      	}
       }
-	  for (const auto &l : lines) {
+	  for (const auto &l : lines)
+      {
             int x1= l[0];
             int y1 = l[1];
             int x2 = l[2];
@@ -115,7 +141,8 @@ void PhigrosClicker::image_callback(const sensor_msgs::msg::Image::SharedPtr msg
             {
               angle_deg = 90.0;
             }
-            else{
+            else
+            {
               angle_deg = angle_rad *180.0/M_PI;
             }
             //存储角度
@@ -127,13 +154,4 @@ void PhigrosClicker::image_callback(const sensor_msgs::msg::Image::SharedPtr msg
               line_angles_.erase(line_angles_.begin());//及时更新角度信息
             }
 	  }
-
-    }
-
-    catch (cv_bridge::Exception& e)
-    {
-      RCLCPP_ERROR(this->get_logger(), "图像转换失败: %s", e.what());
-    }
-
-
-  }
+}

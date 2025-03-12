@@ -14,13 +14,21 @@ find_package(cv_bridge REQUIRED)
 # uncomment the following section in order to fill in
 # further dependencies manually.
 # find_package(<dependency> REQUIRED)
-add_executable(answer src/answer_node.cpp )
+add_executable(answer_node src/answer_node.cpp src/phigros_clicker.cpp)
 # 关联库文件
-ament_target_dependencies(answer cv_bridge rclcpp OpenCV)
+ament_target_dependencies(answer_node cv_bridge rclcpp OpenCV)
 
 install(TARGETS
-answer
+answer_node
 DESTINATION lib/${PROJECT_NAME}
+)
+
+target_include_directories(answer_node PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+install(DIRECTORY include/
+        DESTINATION include/
 )
 
 if(BUILD_TESTING)

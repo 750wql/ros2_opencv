@@ -10,11 +10,16 @@
 #include "geometry_msgs/msg/point32.hpp"
 #include <cmath>
 #include <cv_bridge/cv_bridge.h>
+#include <thread>
+#include <mutex>
 class PhigrosClicker : public rclcpp::Node {  //创建类PhigrosClicker
 public:
     PhigrosClicker();
 private:
+  	std::mutex data_mutex_;        // 保护数据的互斥锁
+    std::thread processing_thread_;// 处理线程
     void image_callback(const sensor_msgs::msg::Image::SharedPtr msg);
+    void processImage(cv::Mat img);
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;//创建一个订阅者image_sub_，用来订阅“raw_image”话题
     rclcpp::Publisher<geometry_msgs::msg::Point32>::SharedPtr pos_pub_;//创建一个发布者pos_pub_, 用来发布消息到“/click position"上
     std::vector<cv::Vec4i> lines;//存储直线信息
