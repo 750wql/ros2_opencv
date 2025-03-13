@@ -23,19 +23,18 @@ void PhigrosClicker::image_callback(const sensor_msgs::msg::Image::SharedPtr msg
           //msg：ROS2 传入的 sensor_msgs::msg::Image（即订阅的原始图像）。
           //"bgr8"：指定图像的编码格式，表示 8位深度 BGR（蓝-绿-红）格式，OpenCV 默认使用 BGR 格式。
           //返回一个 cv_bridge::CvImage::Ptr（智能指针），指向转换后的 OpenCV 图像对象。
-
+	  //主线程获取图像信息
       int total_pixels = img.total();//获取总像素数
       geometry_msgs::msg::Point32 click_pos;
       RCLCPP_INFO(this->get_logger(), "成功转换图像, 尺寸: %dx%d", img.rows, img.cols);
       RCLCPP_INFO(this->get_logger(), "像素个数: %d", total_pixels);
-	  //创建一个新线程来处理图像
-      if (processing_thread_.joinable()) {
-            processing_thread_.join();  // 等待上一个线程结束
-        }
+	  //创建一个新线程处理图像
 
-      processing_thread_ = std::thread([this, img = std::move(img)]() mutable {
+      processing_thread_ = std::thread([this, img = std::move(img)]() mutable {//子线程处理图像
           this->processImage(img);
       });
+      //让线程独立运行
+      processing_thread_.detach();//detach（）让线程独立运行，主程序不会等待它执行完毕
     }
     catch (cv_bridge::Exception& e)
     {
@@ -93,7 +92,7 @@ void PhigrosClicker::processImage(cv::Mat img)
         	//m.m20	计算水平方向的分布
         	//m.m02	计算垂直方向的分布
 			}
-	  }
+	  }//作用域解除自动解锁
       cv::HoughLinesP(edges, lines, 1.0, CV_PI/180.0, 100, 500, 30);
       	//edges	经过 Canny 边缘检测 处理的 二值图
 		//lines	输出的 直线集合，每条直线由 四个整数 (x1, y1, x2, y2) 组成
