@@ -16,6 +16,7 @@ class PhigrosClicker : public rclcpp::Node {  //创建类PhigrosClicker
 public:
     PhigrosClicker();
 private:
+    bool message_sent_ = false;    //设置标志位，用于每次发送坐标
   	std::mutex data_mutex_;        // 保护数据的互斥锁
     std::thread processing_thread_;// 处理线程
     void image_callback(const sensor_msgs::msg::Image::SharedPtr msg);

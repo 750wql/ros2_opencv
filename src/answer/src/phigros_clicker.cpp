@@ -28,6 +28,7 @@ void PhigrosClicker::image_callback(const sensor_msgs::msg::Image::SharedPtr msg
       geometry_msgs::msg::Point32 click_pos;
       RCLCPP_INFO(this->get_logger(), "成功转换图像, 尺寸: %dx%d", img.rows, img.cols);
       RCLCPP_INFO(this->get_logger(), "像素个数: %d", total_pixels);
+      message_sent_ = true;//每次接受到一个新的图像就重置标志位
 	  //创建一个新线程处理图像
 
       processing_thread_ = std::thread([this, img = std::move(img)]() mutable {//子线程处理图像
@@ -73,6 +74,10 @@ void PhigrosClicker::processImage(cv::Mat img)
       		//遍历所有轮廓
       		for (const auto &contour : contours)
             {
+                double area = cv::contourArea(contour);  // 计算轮廓面积
+                std::cout << area << std::endl;//输出面积
+                if (area < 500 || area > 1000) continue;  // 忽略面积太小或太大的区域
+
         		cv::Moments m = cv::moments(contour, true);
         		if(m.m00 > 0){
         			cx = int(m.m10 / m.m00);//计算x方向的质心
@@ -114,7 +119,7 @@ void PhigrosClicker::processImage(cv::Mat img)
 	  }
       {
         std::lock_guard<std::mutex> lock(data_mutex_);
-      	if(lines_center_[0].y - blue_center_[0].y <= 22.0 && blue_center_.size() > 0 && lines_center_.size() > 0)
+      	if(message_sent_ == true && blue_center_.size() > 0 && lines_center_.size() > 0 && lines_center_[0].y - blue_center_[0].y <= 22.0 )
       	{
 			geometry_msgs::msg::Point32 click_pos;
         	click_pos.x = blue_center_[0].x;
@@ -122,7 +127,11 @@ void PhigrosClicker::processImage(cv::Mat img)
         	click_pos.z = 0;
         	//发布点击位置
         	pos_pub_->publish(click_pos);
+            message_sent_ = false;
         	RCLCPP_INFO(this->get_logger(), "发布点击位置:(%2f, %2f)", click_pos.x, click_pos.y);
+            cv::circle(img, cv::Point(click_pos.x, click_pos.y), 10, cv::Scalar(0, 0, 255), -1);//在点击处画一个圈
+			cv::imshow("Click Position", img);
+			cv::waitKey(1);
 			blue_center_.erase(blue_center_.begin());
       	}
       }
@@ -148,7 +157,7 @@ void PhigrosClicker::processImage(cv::Mat img)
             line_angles_.push_back(angle_deg);
             std::cout << angle_deg << std::endl;
             //角度只存一个就够了
-            if(line_angles_.size() > 1.0)
+            if(!line_angles_.empty() && line_angles_.size() > 1.0)
             {
               line_angles_.erase(line_angles_.begin());//及时更新角度信息
             }
