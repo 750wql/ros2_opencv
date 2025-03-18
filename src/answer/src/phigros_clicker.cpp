@@ -76,7 +76,7 @@ void PhigrosClicker::processImage(cv::Mat img)
             {
                 double area = cv::contourArea(contour);  // 计算轮廓面积
                 std::cout << area << std::endl;//输出面积
-                if (area < 500 || area > 1000) continue;  // 忽略面积太小或太大的区域
+                if (area < 50 || area > 1000) continue;  // 忽略面积太小或太大的区域
 
         		cv::Moments m = cv::moments(contour, true);
         		if(m.m00 > 0){
@@ -98,7 +98,7 @@ void PhigrosClicker::processImage(cv::Mat img)
         	//m.m02	计算垂直方向的分布
 			}
 	  }//作用域解除自动解锁
-      cv::HoughLinesP(edges, lines, 1.0, CV_PI/180.0, 100, 500, 30);
+      cv::HoughLinesP(edges, lines, 1.0, CV_PI/180.0, 100, 300, 30);
       	//edges	经过 Canny 边缘检测 处理的 二值图
 		//lines	输出的 直线集合，每条直线由 四个整数 (x1, y1, x2, y2) 组成
 		//1	累加器分辨率 (rho)，单位是 像素，即直线距离的最小步长
@@ -106,6 +106,11 @@ void PhigrosClicker::processImage(cv::Mat img)
 		//100	投票阈值（最小投票数，越大则检测出的直线越少，但质量越高）
 		//500	最短直线长度（低于这个长度的直线会被忽略）
 		//30	最大间断长度（间断部分小于这个值的直线会被合并）
+      if (lines.empty())
+      {
+    	RCLCPP_WARN(this->get_logger(), "未检测到直线");
+    	return;
+	  }
       {
 	  	std::lock_guard<std::mutex> lock(data_mutex_);
         lines_center_.clear();
@@ -117,24 +122,27 @@ void PhigrosClicker::processImage(cv::Mat img)
 			lines_center_.emplace_back((l[0] + l[2]) / 2.0 , (l[1] + l[3]) / 2.0);
       	}
 	  }
-      {
-        std::lock_guard<std::mutex> lock(data_mutex_);
-      	if(message_sent_ == true && blue_center_.size() > 0 && lines_center_.size() > 0 && lines_center_[0].y - blue_center_[0].y <= 22.0 )
-      	{
-			geometry_msgs::msg::Point32 click_pos;
-        	click_pos.x = blue_center_[0].x;
-        	click_pos.y = blue_center_[0].y;
-        	click_pos.z = 0;
+      //{
+        //std::lock_guard<std::mutex> lock(data_mutex_);
+      	//if(message_sent_ == true && blue_center_.size() > 0 && lines_center_.size() > 0 && lines_center_[0].y - blue_center_[0].y <= 22.0 )
+      	//{
+			//geometry_msgs::msg::Point32 click_pos;
+        	//click_pos.x = blue_center_[0].x;
+        	//click_pos.y = blue_center_[0].y;
+        	//click_pos.z = 0;
         	//发布点击位置
-        	pos_pub_->publish(click_pos);
-            message_sent_ = false;
-        	RCLCPP_INFO(this->get_logger(), "发布点击位置:(%2f, %2f)", click_pos.x, click_pos.y);
-            cv::circle(img, cv::Point(click_pos.x, click_pos.y), 10, cv::Scalar(0, 0, 255), -1);//在点击处画一个圈
-			cv::imshow("Click Position", img);
-			cv::waitKey(1);
-			blue_center_.erase(blue_center_.begin());
-      	}
-      }
+        	//pos_pub_->publish(click_pos);
+            //message_sent_ = false;
+        	//RCLCPP_INFO(this->get_logger(), "发布点击位置:(%2f, %2f)", click_pos.x, click_pos.y);
+            //cv::circle(img, cv::Point(click_pos.x, click_pos.y), 10, cv::Scalar(0, 0, 255), -1);//在点击处画一个圈
+			//cv::imshow("Click Position", img);
+			//cv::waitKey(1);
+            //if(blue_center_.size() > 0)
+            //{
+              //blue_center_.erase(blue_center_.begin());
+            //}
+      	//}
+      //}
 	  for (const auto &l : lines)
       {
             int x1= l[0];
@@ -161,5 +169,29 @@ void PhigrosClicker::processImage(cv::Mat img)
             {
               line_angles_.erase(line_angles_.begin());//及时更新角度信息
             }
+            double k = (x1 == x2) ? 0 : (double)(y2 - y1) / (x2 - x1);
+    		double b = y1 - k * x1;
+    		double corrected_y = (x1 == x2) ? (y1 + y2) / 2.0 : (k * blue_center_[0].x + b);
+			{
+        		std::lock_guard<std::mutex> lock(data_mutex_);
+      			if(message_sent_ == true && blue_center_.size() > 0 && lines_center_.size() > 0 && corrected_y - blue_center_[0].y <= 22.0 )
+      			{
+					geometry_msgs::msg::Point32 click_pos;
+        			click_pos.x = blue_center_[0].x;
+        			click_pos.y = blue_center_[0].y;
+        			click_pos.z = 0;
+        			//发布点击位置
+        			pos_pub_->publish(click_pos);
+            		message_sent_ = false;
+        			RCLCPP_INFO(this->get_logger(), "发布点击位置:(%2f, %2f)", click_pos.x, click_pos.y);
+            		cv::circle(img, cv::Point(click_pos.x, click_pos.y), 10, cv::Scalar(0, 0, 255), -1);//在点击处画一个圈
+					cv::imshow("Click Position", img);
+					cv::waitKey(1);
+            		if(blue_center_.size() > 0)
+            		{
+              			blue_center_.erase(blue_center_.begin());
+            		}
+      			}
+      		}
 	  }
 }
